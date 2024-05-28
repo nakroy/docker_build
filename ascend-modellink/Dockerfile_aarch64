@@ -1,0 +1,63 @@
+ARG BASE_VERSION
+ARG BASE=ascend-toolkit:$BASE_VERSION
+FROM $BASE
+
+WORKDIR /tmp
+COPY . ./
+
+SHELL ["/bin/bash", "-c"]
+
+# 设置运行用户和工作目录
+USER root
+WORKDIR /root/
+
+# 安装miniconda、设置pip源和写入环境变量
+RUN wget -U NoSuchBrowser/1.0 https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-py39_24.3.0-0-Linux-aarch64.sh && \
+    bash Miniconda3-py39_24.3.0-0-Linux-aarch64.sh -b -p /root/miniconda3 && \
+    rm -rf Miniconda3-*.sh
+
+ENV PATH=/root/miniconda3/bin:$PATH
+
+# 部署pytorch2.1.0 python3.9版本的conda环境
+RUN conda init && \
+    conda create -n modellink_py39 python=3.9 -y && \
+    echo 'export HF_ENDPOINT=https://hf-mirror.com' >> ~/.bashrc && \
+    echo 'source /usr/local/Ascend/ascend-toolkit/set_env.sh' >> ~/.bashrc && \
+    echo 'conda activate modellink_py39' >> ~/.bashrc
+
+ENV PATH=/root/miniconda3/envs/modellink_py39/bin:$PATH
+
+SHELL ["/bin/bash", "--login", "-c"]
+# 设定为在modellink_py39的conda环境中执行余下的RUN命令
+RUN pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    pip3 install pip -U && \
+    pip3 install torch==2.1.0 && \
+    pip3 install numpy && \
+    pip3 install absl-py attrs cloudpickle decorator jinja2 psutil scipy synr==0.5.0 tornado && \
+    wget https://gitee.com/ascend/pytorch/releases/download/v5.0.0-pytorch2.1.0/torch_npu-2.1.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl && \
+    pip3 install torch_npu-2.1.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl && \
+    wget https://gitee.com/chinasuv/ascend-apex_torch/raw/master/apex_torch_2.1.0/apex-0.1_ascend-cp39-cp39-linux_aarch64.whl && \
+    pip3 install apex-0.1_ascend-cp39-cp39-linux_aarch64.whl && \
+    git init && git clone -b 1.0.0 https://gitee.com/ascend/ModelLink.git && \
+    # 此处Modellink的1.0.0分支为2024-4-29 01:34:46提交的版本，可以根据实际需要切换为其他分支版本
+    cd ModelLink && \
+    git checkout 4ad901b67d17645a98fcf2545e2d6a883f5a297c && cd .. && \
+    # 克隆Megatron-LM特定版本库
+    git clone https://github.com/NVIDIA/Megatron-LM.git && \
+    cd Megatron-LM &&\ 
+    git checkout -f bcce6f && \
+    cp -r megatron ../ModelLink/ && \
+    cd .. && \
+    cd ModelLink && \
+    mkdir logs model_from_hf dataset ckpt && \
+    # 安装AscendSpeed加速库
+    git clone https://gitee.com/ascend/AscendSpeed.git && \
+    cd AscendSpeed && \
+    git checkout 224ae35e8fc96778f957029d1371ddb623452a50 && \
+    pip3 install -r requirements.txt && \
+    pip3 install -e . && \
+    cd .. && \
+    pip3 install -r requirements.txt && \
+    cd .. && \
+    rm -rf ~/.cache/pip && \
+    rm -rf  torch_npu*.whl apex-*.whl Megatron-LM
